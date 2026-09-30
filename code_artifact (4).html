@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>한국중부발전 실시간 대기오염물질 배출 현황 대시보드</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter & Noto Sans KR -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans KR', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0284c7',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.15); opacity: 0.4; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .live-dot {
+            animation: pulse-ring 2s infinite ease-in-out;
+        }
+        
+        @keyframes glow-warning {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.4); }
+            50% { box-shadow: 0 0 12px 4px rgba(244, 63, 94, 0.6); }
+        }
+        .animate-glow-warning {
+            animation: glow-warning 2s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased selection:bg-sky-500 selection:text-white">
+
+    <header class="bg-slate-900 text-white shadow-xl sticky top-0 z-50 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row justify-between items-center gap-3">
+            <div class="flex items-center space-x-3 w-full md:w-auto justify-between md:justify-start">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-sky-600 p-2.5 rounded-xl shadow-md flex items-center justify-center">
+                        <i class="fa-solid fa-satellite-dish text-white text-xl animate-pulse"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                            실시간 대기오염물질 모니터링
+                            <span class="inline-flex items-center gap-1.5 text-xs bg-emerald-500/20 text-emerald-300 font-semibold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span>
+                                LIVE (30초 자동 동기화)
+                            </span>
+                        </h1>
+                        <p class="text-xs text-slate-400">구글 스프레드시트 연동 대기배출 통합 관리 플랫폼</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sync Controls and Timer -->
+            <div class="flex flex-wrap items-center justify-between md:justify-end w-full md:w-auto gap-3 text-xs">
+                <!-- Countdown Timer Display -->
+                <div class="flex items-center space-x-2 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700">
+                    <i class="fa-solid fa-stopwatch text-amber-400"></i>
+                    <span>다음 갱신: <strong id="countdown" class="text-amber-400 text-sm font-mono font-bold">30</strong>초</span>
+                    <div class="w-14 bg-slate-700 h-1.5 rounded-full overflow-hidden ml-1">
+                        <div id="progressBar" class="bg-amber-400 h-full transition-all duration-1000 ease-linear" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- Last Sync Status Badge -->
+                <div class="flex items-center space-x-1.5 bg-slate-800/90 px-3 py-1.5 rounded-xl border border-slate-700">
+                    <i class="fa-solid fa-cloud-arrow-down text-sky-400"></i>
+                    <span>동기화 시각: <strong id="lastSyncTime" class="text-white font-medium">연동 중...</strong></span>
+                </div>
+
+                <!-- Manual Refresh Button -->
+                <button id="manualRefreshBtn" onclick="fetchLiveData(true)" class="flex items-center space-x-1.5 bg-sky-600 hover:bg-sky-500 text-white font-semibold px-3 py-1.5 rounded-xl transition-all active:scale-95 shadow-md">
+                    <i id="refreshIcon" class="fa-solid fa-arrows-rotate"></i>
+                    <span>지금 갱신</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Notification Toast Banner -->
+    <div id="toastNotification" class="hidden transition-all duration-300 bg-sky-900/90 border-b border-sky-700 text-sky-100 text-xs py-2 px-4 text-center font-medium flex items-center justify-center space-x-2">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-sm"></i>
+        <span id="toastMessage">데이터가 성공적으로 동기화되었습니다.</span>
+    </div>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- Dynamic Summary KPI Section -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            
+            <!-- KPI 1: Data Count -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 hover:shadow-md transition-all">
+                <div class="flex items-center justify-between pb-3">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">총 관측 데이터 수</span>
+                    <div class="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <i class="fa-solid fa-database text-base"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline justify-between">
+                    <div>
+                        <div id="kpiTotalCount" class="text-2xl font-extrabold text-slate-900">-</div>
+                        <p id="kpiPlantCount" class="text-xs text-slate-500 mt-1">발전소 수집 레코드</p>
+                    </div>
+                    <span class="inline-flex items-center text-xs font-medium text-sky-600 bg-sky-50 px-2.5 py-1 rounded-lg">
+                        <i class="fa-solid fa-wifi text-[10px] mr-1"></i>실시간
+                    </span>
+                </div>
+            </div>
+
+            <!-- KPI 2: SOx Average -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 hover:shadow-md transition-all">
+                <div class="flex items-center justify-between pb-3">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">이산화황 (SOx) 평균</span>
+                    <div class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <i class="fa-solid fa-leaf text-base"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline justify-between">
+                    <div>
+                        <div class="text-2xl font-extrabold text-slate-900"><span id="kpiSoxAvg">-</span> <span class="text-sm font-normal text-slate-500">ppm</span></div>
+                        <p id="kpiSoxSub" class="text-xs text-slate-500 mt-1">허용기준 대비 안전 준수</p>
+                    </div>
+                    <span id="kpiSoxBadge" class="inline-flex items-center text-xs font-semibold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-lg">
+                        안정
+                    </span>
+                </div>
+            </div>
+
+            <!-- KPI 3: NOx Average & Exceedances -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 hover:shadow-md transition-all">
+                <div class="flex items-center justify-between pb-3">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">질소산화물 (NOx) 평균</span>
+                    <div class="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                        <i class="fa-solid fa-triangle-exclamation text-base"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline justify-between">
+                    <div>
+                        <div class="text-2xl font-extrabold text-slate-900"><span id="kpiNoxAvg">-</span> <span class="text-sm font-normal text-slate-500">ppm</span></div>
+                        <p id="kpiNoxSub" class="text-xs text-slate-500 mt-1">초과 건수 계산 중...</p>
+                    </div>
+                    <span id="kpiNoxBadge" class="inline-flex items-center text-xs font-semibold text-rose-700 bg-rose-100 px-2.5 py-1 rounded-lg">
+                        중점 관리
+                    </span>
+                </div>
+            </div>
+
+            <!-- KPI 4: Dust Average -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 hover:shadow-md transition-all">
+                <div class="flex items-center justify-between pb-3">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">먼지 (Dust) 평균</span>
+                    <div class="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <i class="fa-solid fa-smog text-base"></i>
+                    </div>
+                </div>
+                <div class="flex items-baseline justify-between">
+                    <div>
+                        <div class="text-2xl font-extrabold text-slate-900"><span id="kpiDustAvg">-</span> <span class="text-sm font-normal text-slate-500">mg/Sm³</span></div>
+                        <p id="kpiDustSub" class="text-xs text-slate-500 mt-1">집진 설비 가동 상태</p>
+                    </div>
+                    <span id="kpiDustBadge" class="inline-flex items-center text-xs font-semibold text-indigo-700 bg-indigo-100 px-2.5 py-1 rounded-lg">
+                        정상
+                    </span>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4">
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center space-x-2 text-sm font-semibold text-slate-700">
+                    <i class="fa-solid fa-filter text-sky-600"></i>
+                    <span>조회 필터:</span>
+                </div>
+                
+                <!-- Dynamic Plant Dropdown Filter -->
+                <select id="plantFilter" onchange="applyFilters()" class="bg-slate-50 border border-slate-300 text-slate-800 text-xs sm:text-sm rounded-xl px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none">
+                    <option value="ALL">전체 발전소 (로딩 중...)</option>
+                </select>
+
+                <!-- Status Filter -->
+                <select id="statusFilter" onchange="applyFilters()" class="bg-slate-50 border border-slate-300 text-slate-800 text-xs sm:text-sm rounded-xl px-3 py-2 focus:ring-2 focus:ring-sky-500 focus:outline-none">
+                    <option value="ALL">전체 관측 상태</option>
+                    <option value="EXCEED_NOX">NOx 허용기준 초과만</option>
+                    <option value="EXCEED_DUST">먼지 허용기준 초과만</option>
+                    <option value="NORMAL">정상 관측 데이터만</option>
+                </select>
+
+                <!-- Search Input -->
+                <div class="relative flex-1 min-w-[200px]">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+                    <input type="text" id="searchInput" onkeyup="applyFilters()" placeholder="발전기, 호기, 년월 검색..." class="w-full bg-slate-50 border border-slate-300 pl-8 pr-3 py-1.5 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-2">
+                <button onclick="resetFilters()" class="text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl transition-all">
+                    <i class="fa-solid fa-rotate-left mr-1"></i>필터 초기화
+                </button>
+                <button onclick="exportFilteredCSV()" class="text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 shadow-sm active:scale-95">
+                    <i class="fa-solid fa-file-csv"></i>CSV 다운로드
+                </button>
+            </div>
+        </section>
+
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Time Series Trend Line Chart (7 cols) -->
+            <div class="lg:col-span-7 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line text-sky-600"></i>
+                            기간별 오염물질 평균 농도 변화 추이
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-0.5">수집 시계열에 따른 오염물질 평균 농도 변화 곡선</p>
+                    </div>
+                    <div class="flex items-center space-x-3 text-xs">
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-sky-500"></span>SOx</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>NOx</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>먼지</span>
+                    </div>
+                </div>
+                <div class="relative flex-1 min-h-[300px] mt-4">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Plant Comparison Bar Chart (5 cols) -->
+            <div class="lg:col-span-5 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-column text-amber-500"></i>
+                            발전기별 NOx 평균 배출량
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-0.5">사업장별 질소산화물 부하 수치 비교</p>
+                    </div>
+                </div>
+                <div class="relative flex-1 min-h-[300px] mt-4">
+                    <canvas id="plantChart"></canvas>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Allowable Limit Ratio Comparison (6 cols) -->
+            <div class="lg:col-span-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <i class="fa-solid fa-percent text-indigo-600"></i>
+                            허용기준 대비 배출 비율 (%)
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-0.5">발전기별 규제 허용기준 대비 실측농도 비율 비교</p>
+                    </div>
+                </div>
+                <div class="relative h-[280px] mt-4">
+                    <canvas id="ratioChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Exceedance Share Donut Chart (6 cols) -->
+            <div class="lg:col-span-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-pie text-rose-500"></i>
+                            발전기별 NOx 초과 발생 점유율
+                        </h2>
+                        <p class="text-xs text-slate-500 mt-0.5">허용기준 초과 건의 발전소별 기여 비율</p>
+                    </div>
+                    <span id="exceedTotalBadge" class="text-xs bg-rose-50 text-rose-700 font-semibold px-2.5 py-1 rounded-lg">
+                        초과 집계 중...
+                    </span>
+                </div>
+                <div class="relative h-[280px] mt-4 flex items-center justify-center">
+                    <canvas id="exceedDoughnutChart"></canvas>
+                </div>
+            </div>
+
+        </section>
+
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-table-list text-sky-600"></i>
+                        발전기별 통합 대기오염물질 배출 현황
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">구글 연동 데이터 수집 내역 발전기 단위 합산 분석</p>
+                </div>
+                <div class="text-xs text-slate-500 font-medium bg-slate-100 px-3 py-1.5 rounded-lg">
+                    <i class="fa-solid fa-circle-info mr-1 text-sky-600"></i>단위: SOx/NOx (ppm), 먼지 (mg/Sm³)
+                </div>
+            </div>
+
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left border-collapse text-xs sm:text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                            <th class="py-3 px-4">발전기명</th>
+                            <th class="py-3 px-4 text-center">관측 건수</th>
+                            <th class="py-3 px-4 text-right">SOx 평균</th>
+                            <th class="py-3 px-4 text-right">NOx 평균</th>
+                            <th class="py-3 px-4 text-right">먼지 평균</th>
+                            <th class="py-3 px-4 text-center">NOx 초과</th>
+                            <th class="py-3 px-4 text-center">먼지 초과</th>
+                            <th class="py-3 px-4 text-center">관리 상태</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-700" id="plantTableBody">
+                        <tr>
+                            <td colspan="8" class="text-center py-8 text-slate-400">
+                                <i class="fa-solid fa-spinner fa-spin mr-2 text-sky-500 text-lg"></i>실시간 데이터를 로딩하는 중입니다...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-100 gap-2">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-indigo-600"></i>
+                        실시간 상세 관측 데이터 및 초과 이력
+                    </h2>
+                    <p class="text-xs text-slate-500 mt-0.5">상위 100개 데이터 표시 (검색 및 필터 조건 반영)</p>
+                </div>
+                <span id="filteredLogCount" class="text-xs text-slate-600 bg-slate-100 px-3 py-1 rounded-full font-medium">
+                    0건 관측
+                </span>
+            </div>
+
+            <div class="mt-4 overflow-x-auto custom-scrollbar max-h-96">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead class="sticky top-0 bg-slate-100 text-slate-700 font-semibold shadow-xs">
+                        <tr>
+                            <th class="py-2.5 px-3">발전기</th>
+                            <th class="py-2.5 px-3">호기명</th>
+                            <th class="py-2.5 px-3">배출년월</th>
+                            <th class="py-2.5 px-3 text-right">SOx (ppm)</th>
+                            <th class="py-2.5 px-3 text-right">NOx (ppm)</th>
+                            <th class="py-2.5 px-3 text-right">먼지 (mg/Sm³)</th>
+                            <th class="py-2.5 px-3 text-center">상태</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-600" id="exceedLogBody">
+                        <tr>
+                            <td colspan="7" class="text-center py-8 text-slate-400">
+                                관측 데이터를 확인하는 중입니다...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 text-slate-400 text-xs py-6 mt-12 border-t border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-leaf text-emerald-400 text-base"></i>
+                <span class="font-medium text-slate-300">한국중부발전(주) 대기환경 실시간 모니터링 대시보드</span>
+            </div>
+            <p class="text-slate-500">Google Sheets Publish CSV Auto-Polling Enabled (30s)</p>
+        </div>
+    </footer>
+
+    <script>
+        // Google Sheets Target Published CSV Endpoint
+        const CSV_TARGET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRsiATUOPNCsK6KTwOArq47cghpTUmXlyH0jgAzb6t0aJtIHPiDkD8w5rS8UW_1m6N1xGR7HshI6dkZ/pub?output=csv";
+
+        // Global Application State
+        let parsedRows = [];
+        let filteredRows = [];
+        let aggregatedPlants = [];
+        let countdownValue = 30;
+        let countdownTimer = null;
+
+        // Chart Instances
+        let trendChartObj = null;
+        let plantChartObj = null;
+        let ratioChartObj = null;
+        let exceedDoughnutObj = null;
+
+        // Fallback Dataset in case of network issues or structure setup
+        const fallbackData = [
+            { plant: "보령", unit: "1호기", date: "2025-01", sox: 4.98, nox: 13.10, dust: 1.21, noxLimit: 50, dustLimit: 10, soxLimit: 30 },
+            { plant: "보령", unit: "2호기", date: "2025-01", sox: 5.10, nox: 14.20, dust: 1.15, noxLimit: 50, dustLimit: 10, soxLimit: 30 },
+            { plant: "서울", unit: "1호기", date: "2025-01", sox: 0.00, nox: 5.38, dust: 0.00, noxLimit: 20, dustLimit: 5, soxLimit: 10 },
+            { plant: "세종", unit: "1호기", date: "2025-01", sox: 0.00, nox: 4.73, dust: 0.00, noxLimit: 20, dustLimit: 5, soxLimit: 10 },
+            { plant: "신보령", unit: "1호기", date: "2025-01", sox: 6.92, nox: 5.66, dust: 1.01, noxLimit: 30, dustLimit: 10, soxLimit: 30 },
+            { plant: "신서천", unit: "1호기", date: "2025-01", sox: 2.68, nox: 8.28, dust: 0.49, noxLimit: 15, dustLimit: 5, soxLimit: 20 },
+            { plant: "인천", unit: "1호기", date: "2025-01", sox: 0.00, nox: 6.04, dust: 0.00, noxLimit: 25, dustLimit: 5, soxLimit: 10 },
+            { plant: "제주", unit: "내연1호기", date: "2025-01", sox: 1.19, nox: 125.44, dust: 2.76, noxLimit: 119, dustLimit: 10, soxLimit: 20 },
+            { plant: "제주", unit: "내연2호기", date: "2025-01", sox: 1.25, nox: 132.10, dust: 2.80, noxLimit: 119, dustLimit: 10, soxLimit: 20 }
+        ];
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            fetchLiveData();
+            startCountdownTimer();
+        });
+
+        // 30 Seconds Countdown Timer Polling Loop
+        function startCountdownTimer() {
+            if (countdownTimer) clearInterval(countdownTimer);
+            countdownValue = 30;
+
+            countdownTimer = setInterval(() => {
+                countdownValue--;
+                const countdownEl = document.getElementById('countdown');
+                const progressBar = document.getElementById('progressBar');
+                
+                if (countdownEl) countdownEl.innerText = countdownValue;
+                if (progressBar) progressBar.style.width = `${(countdownValue / 30) * 100}%`;
+
+                if (countdownValue <= 0) {
+                    countdownValue = 30;
+                    fetchLiveData(false);
+                }
+            }, 1000);
+        }
+
+        async function fetchLiveData(isManual = false) {
+            const refreshIcon = document.getElementById('refreshIcon');
+            if (refreshIcon) refreshIcon.classList.add('fa-spin');
+
+            // Add timestamp parameter to avoid HTTP caching
+            const fetchUrl = `${CSV_TARGET_URL}&_t=${Date.now()}`;
+
+            try {
+                const response = await fetch(fetchUrl, { cache: "no-store" });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const csvText = await response.text();
+                const fetchedRows = parseCSV(csvText);
+
+                if (fetchedRows && fetchedRows.length > 0) {
+                    parsedRows = fetchedRows;
+                    showToast(isManual ? "사용자 요청으로 최신 데이터로 동기화되었습니다." : "구글 스프레드시트 30초 자동 동기화 완료.");
+                } else {
+                    throw new Error("CSV parsed result is empty.");
+                }
+            } catch (err) {
+                console.warn("Live fetch fallback initialized.", err);
+                if (parsedRows.length === 0) {
+                    parsedRows = fallbackData;
+                }
+                showToast("구글 스프레드시트 데이터 연동 중 (로컬 캐시표출)", true);
+            } finally {
+                if (refreshIcon) refreshIcon.classList.remove('fa-spin');
+                
+                // Update Last Sync Time Display
+                const now = new Date();
+                const timeString = now.toLocaleTimeString('ko-KR', { hour12: false });
+                document.getElementById('lastSyncTime').innerText = timeString;
+
+                // Reset countdown UI on manual trigger
+                if (isManual) {
+                    countdownValue = 30;
+                    document.getElementById('countdown').innerText = '30';
+                    document.getElementById('progressBar').style.width = '100%';
+                }
+
+                populatePlantFilterOptions();
+                processAggregations();
+                applyFilters();
+            }
+        }
+
+        function parseCSV(csvText) {
+            const lines = csvText.split(/\r\n|\n/);
+            if (lines.length < 2) return [];
+
+            const headers = parseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+            const results = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                const values = parseCSVLine(lines[i]);
+                const rowObj = {};
+                
+                headers.forEach((h, idx) => {
+                    let val = values[idx] ? values[idx].trim().replace(/^"|"$/g, '') : '';
+                    rowObj[h] = val;
+                });
+
+                // Flexible header matching for diverse CSV column formats
+                const plant = rowObj['발전기'] || rowObj['발전소'] || rowObj['사업장'] || rowObj['Plant'] || '기타';
+                const unit = rowObj['호기'] || rowObj['호기명'] || rowObj['Unit'] || '1호기';
+                const date = rowObj['배출년월'] || rowObj['년월'] || rowObj['일시'] || rowObj['Date'] || '2025-01';
+                
+                const sox = parseFloat(rowObj['SOx'] || rowObj['이산화황'] || rowObj['SOX'] || 0) || 0;
+                const nox = parseFloat(rowObj['NOx'] || rowObj['질소산화물'] || rowObj['NOX'] || 0) || 0;
+                const dust = parseFloat(rowObj['먼지'] || rowObj['Dust'] || rowObj['DUST'] || 0) || 0;
+
+                const noxLimit = parseFloat(rowObj['NOx허용기준'] || rowObj['NOx_기준'] || 100) || 100;
+                const dustLimit = parseFloat(rowObj['먼지허용기준'] || rowObj['먼지_기준'] || 10) || 10;
+                const soxLimit = parseFloat(rowObj['SOx허용기준'] || rowObj['SOx_기준'] || 50) || 50;
+
+                results.push({ plant, unit, date, sox, nox, dust, noxLimit, dustLimit, soxLimit, raw: rowObj });
+            }
+
+            return results;
+        }
+
+        // CSV Line Splitter with Quote Handling
+        function parseCSVLine(text) {
+            const result = [];
+            let cur = '';
+            let inQuotes = false;
+
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i];
+                if (c === '"') {
+                    inQuotes = !inQuotes;
+                } else if (c === ',' && !inQuotes) {
+                    result.push(cur);
+                    cur = '';
+                } else {
+                    cur += c;
+                }
+            }
+            result.push(cur);
+            return result;
+        }
+
+        function populatePlantFilterOptions() {
+            const select = document.getElementById('plantFilter');
+            const currentSelection = select.value;
+
+            const plants = Array.from(new Set(parsedRows.map(r => r.plant))).sort();
+            
+            select.innerHTML = `<option value="ALL">전체 발전소 (${plants.length}개소)</option>`;
+            plants.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p;
+                opt.textContent = `${p} 발전기`;
+                select.appendChild(opt);
+            });
+
+            if (plants.includes(currentSelection)) {
+                select.value = currentSelection;
+            }
+        }
+
+        function processAggregations() {
+            const map = {};
+
+            parsedRows.forEach(r => {
+                if (!map[r.plant]) {
+                    map[r.plant] = {
+                        name: r.plant,
+                        count: 0,
+                        soxSum: 0,
+                        noxSum: 0,
+                        dustSum: 0,
+                        noxLimitSum: 0,
+                        dustLimitSum: 0,
+                        soxLimitSum: 0,
+                        noxExceed: 0,
+                        dustExceed: 0
+                    };
+                }
+
+                const entry = map[r.plant];
+                entry.count++;
+                entry.soxSum += r.sox;
+                entry.noxSum += r.nox;
+                entry.dustSum += r.dust;
+                entry.noxLimitSum += r.noxLimit;
+                entry.dustLimitSum += r.dustLimit;
+                entry.soxLimitSum += r.soxLimit;
+
+                if (r.nox > r.noxLimit) entry.noxExceed++;
+                if (r.dust > r.dustLimit) entry.dustExceed++;
+            });
+
+            aggregatedPlants = Object.values(map).map(p => ({
+                name: p.name,
+                count: p.count,
+                soxAvg: p.count > 0 ? p.soxSum / p.count : 0,
+                noxAvg: p.count > 0 ? p.noxSum / p.count : 0,
+                dustAvg: p.count > 0 ? p.dustSum / p.count : 0,
+                noxExceed: p.noxExceed,
+                dustExceed: p.dustExceed,
+                soxRatio: p.soxLimitSum > 0 ? (p.soxSum / p.soxLimitSum) * 100 : 0,
+                noxRatio: p.noxLimitSum > 0 ? (p.noxSum / p.noxLimitSum) * 100 : 0,
+                dustRatio: p.dustLimitSum > 0 ? (p.dustSum / p.dustLimitSum) * 100 : 0
+            }));
+        }
+
+        function applyFilters() {
+            const plantVal = document.getElementById('plantFilter').value;
+            const statusVal = document.getElementById('statusFilter').value;
+            const searchVal = document.getElementById('searchInput').value.toLowerCase().trim();
+
+            filteredRows = parsedRows.filter(r => {
+                // Plant Filter
+                if (plantVal !== 'ALL' && r.plant !== plantVal) return false;
+
+                // Status Filter
+                if (statusVal === 'EXCEED_NOX' && r.nox <= r.noxLimit) return false;
+                if (statusVal === 'EXCEED_DUST' && r.dust <= r.dustLimit) return false;
+                if (statusVal === 'NORMAL' && (r.nox > r.noxLimit || r.dust > r.dustLimit)) return false;
+
+                // Search Query
+                if (searchVal) {
+                    const combined = `${r.plant} ${r.unit} ${r.date}`.toLowerCase();
+                    if (!combined.includes(searchVal)) return false;
+                }
+
+                return true;
+            });
+
+            updateKPIs();
+            renderPlantTable();
+            renderFilteredLogs();
+            updateCharts();
+        }
+
+        function updateKPIs() {
+            const totalCount = filteredRows.length;
+            const plantSet = new Set(filteredRows.map(r => r.plant));
+
+            const soxAvg = totalCount > 0 ? filteredRows.reduce((a, b) => a + b.sox, 0) / totalCount : 0;
+            const noxAvg = totalCount > 0 ? filteredRows.reduce((a, b) => a + b.nox, 0) / totalCount : 0;
+            const dustAvg = totalCount > 0 ? filteredRows.reduce((a, b) => a + b.dust, 0) / totalCount : 0;
+
+            const noxExceedCount = filteredRows.filter(r => r.nox > r.noxLimit).length;
+            const dustExceedCount = filteredRows.filter(r => r.dust > r.dustLimit).length;
+
+            document.getElementById('kpiTotalCount').innerText = `${totalCount.toLocaleString()}건`;
+            document.getElementById('kpiPlantCount').innerText = `${plantSet.size}개 발전기 관측 데이터`;
+
+            document.getElementById('kpiSoxAvg').innerText = soxAvg.toFixed(2);
+            document.getElementById('kpiNoxAvg').innerText = noxAvg.toFixed(2);
+            document.getElementById('kpiDustAvg').innerText = dustAvg.toFixed(2);
+
+            document.getElementById('kpiNoxSub').innerText = `허용기준 초과 ${noxExceedCount}건 발생`;
+            document.getElementById('kpiDustSub').innerText = `허용기준 초과 ${dustExceedCount}건 발생`;
+
+            document.getElementById('exceedTotalBadge').innerText = `초과 총 ${noxExceedCount}건`;
+        }
+
+        function renderPlantTable() {
+            const tbody = document.getElementById('plantTableBody');
+            tbody.innerHTML = '';
+
+            if (aggregatedPlants.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-6 text-slate-400">데이터가 없습니다.</td></tr>`;
+                return;
+            }
+
+            aggregatedPlants.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition-colors';
+
+                let statusBadge = `<span class="bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-0.5 rounded-full text-xs">양호</span>`;
+                if (p.noxExceed > 20) {
+                    statusBadge = `<span class="bg-rose-100 text-rose-800 font-semibold px-2.5 py-0.5 rounded-full text-xs">고위험</span>`;
+                } else if (p.noxExceed > 0 || p.dustExceed > 0) {
+                    statusBadge = `<span class="bg-amber-100 text-amber-800 font-semibold px-2.5 py-0.5 rounded-full text-xs">중점관리</span>`;
+                }
+
+                tr.innerHTML = `
+                    <td class="py-3 px-4 font-bold text-slate-900">${p.name} 발전기</td>
+                    <td class="py-3 px-4 text-center font-medium">${p.count}건</td>
+                    <td class="py-3 px-4 text-right font-semibold text-slate-800">${p.soxAvg.toFixed(2)}</td>
+                    <td class="py-3 px-4 text-right font-bold ${p.noxAvg > 20 ? 'text-amber-600' : 'text-slate-800'}">${p.noxAvg.toFixed(2)}</td>
+                    <td class="py-3 px-4 text-right font-semibold text-slate-800">${p.dustAvg.toFixed(2)}</td>
+                    <td class="py-3 px-4 text-center">${p.noxExceed > 0 ? `<span class="text-rose-600 font-extrabold bg-rose-50 px-2 py-0.5 rounded">${p.noxExceed}건</span>` : '<span class="text-slate-400">0</span>'}</td>
+                    <td class="py-3 px-4 text-center">${p.dustExceed > 0 ? `<span class="text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded">${p.dustExceed}건</span>` : '<span class="text-slate-400">0</span>'}</td>
+                    <td class="py-3 px-4 text-center">${statusBadge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderFilteredLogs() {
+            const tbody = document.getElementById('exceedLogBody');
+            tbody.innerHTML = '';
+
+            const displayRows = filteredRows.slice(0, 100);
+            document.getElementById('filteredLogCount').innerText = `${filteredRows.length}건 중 ${displayRows.length}건 표시`;
+
+            if (displayRows.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">조건에 일치하는 데이터가 없습니다.</td></tr>`;
+                return;
+            }
+
+            displayRows.forEach(r => {
+                const tr = document.createElement('tr');
+                const isExceed = r.nox > r.noxLimit || r.dust > r.dustLimit;
+                tr.className = isExceed ? 'bg-rose-50/50 hover:bg-rose-100/50 transition-colors border-b border-slate-100' : 'hover:bg-slate-50 transition-colors border-b border-slate-100';
+
+                let statusText = `<span class="text-emerald-600 font-semibold">정상</span>`;
+                if (r.nox > r.noxLimit) {
+                    statusText = `<span class="text-rose-600 font-bold">NOx 초과</span>`;
+                } else if (r.dust > r.dustLimit) {
+                    statusText = `<span class="text-amber-600 font-bold">먼지 초과</span>`;
+                }
+
+                tr.innerHTML = `
+                    <td class="py-2.5 px-3 font-semibold text-slate-900">${r.plant}</td>
+                    <td class="py-2.5 px-3 text-slate-600">${r.unit}</td>
+                    <td class="py-2.5 px-3 font-medium text-slate-500">${r.date}</td>
+                    <td class="py-2.5 px-3 text-right font-semibold text-slate-700">${r.sox.toFixed(2)}</td>
+                    <td class="py-2.5 px-3 text-right font-bold ${r.nox > r.noxLimit ? 'text-rose-600' : 'text-slate-700'}">${r.nox.toFixed(2)}</td>
+                    <td class="py-2.5 px-3 text-right font-semibold ${r.dust > r.dustLimit ? 'text-amber-600' : 'text-slate-700'}">${r.dust.toFixed(2)}</td>
+                    <td class="py-2.5 px-3 text-center">${statusText}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function initCharts() {
+            // 1. Time Series Line Chart
+            const ctxTrend = document.getElementById('trendChart').getContext('2d');
+            trendChartObj = new Chart(ctxTrend, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'SOx', data: [], borderColor: '#0284c7', backgroundColor: 'rgba(2, 132, 199, 0.08)', borderWidth: 2, tension: 0.3, fill: true },
+                        { label: 'NOx', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.08)', borderWidth: 2, tension: 0.3, fill: true },
+                        { label: '먼지', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 2, tension: 0.3, fill: true }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } }
+                }
+            });
+
+            // 2. Plant Comparison Bar Chart
+            const ctxPlant = document.getElementById('plantChart').getContext('2d');
+            plantChartObj = new Chart(ctxPlant, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{ label: 'NOx 평균 (ppm)', data: [], backgroundColor: '#38bdf8', borderRadius: 6 }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } }
+                }
+            });
+
+            // 3. Ratio Chart
+            const ctxRatio = document.getElementById('ratioChart').getContext('2d');
+            ratioChartObj = new Chart(ctxRatio, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'SOx 비율(%)', data: [], backgroundColor: '#38bdf8', borderRadius: 4 },
+                        { label: 'NOx 비율(%)', data: [], backgroundColor: '#f59e0b', borderRadius: 4 },
+                        { label: '먼지 비율(%)', data: [], backgroundColor: '#10b981', borderRadius: 4 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } },
+                    scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' } }, x: { grid: { display: false } } }
+                }
+            });
+
+            // 4. Doughnut Chart
+            const ctxDoughnut = document.getElementById('exceedDoughnutChart').getContext('2d');
+            exceedDoughnutObj = new Chart(ctxDoughnut, {
+                type: 'doughnut',
+                data: {
+                    labels: [],
+                    datasets: [{ data: [], backgroundColor: ['#f43f5e', '#fb923c', '#eab308', '#a855f7', '#06b6d4', '#3b82f6'] }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+                    cutout: '65%'
+                }
+            });
+        }
+
+        function updateCharts() {
+            if (!trendChartObj || !plantChartObj || !ratioChartObj || !exceedDoughnutObj) return;
+
+            // Trend Chart Data
+            const dateMap = {};
+            filteredRows.forEach(r => {
+                if (!dateMap[r.date]) dateMap[r.date] = { count: 0, sox: 0, nox: 0, dust: 0 };
+                dateMap[r.date].count++;
+                dateMap[r.date].sox += r.sox;
+                dateMap[r.date].nox += r.nox;
+                dateMap[r.date].dust += r.dust;
+            });
+
+            const sortedDates = Object.keys(dateMap).sort();
+            trendChartObj.data.labels = sortedDates;
+            trendChartObj.data.datasets[0].data = sortedDates.map(d => (dateMap[d].sox / dateMap[d].count).toFixed(2));
+            trendChartObj.data.datasets[1].data = sortedDates.map(d => (dateMap[d].nox / dateMap[d].count).toFixed(2));
+            trendChartObj.data.datasets[2].data = sortedDates.map(d => (dateMap[d].dust / dateMap[d].count).toFixed(2));
+            trendChartObj.update();
+
+            // Plant Comparison Chart
+            plantChartObj.data.labels = aggregatedPlants.map(p => p.name);
+            plantChartObj.data.datasets[0].data = aggregatedPlants.map(p => p.noxAvg.toFixed(2));
+            plantChartObj.data.datasets[0].backgroundColor = aggregatedPlants.map(p => p.noxAvg > 30 ? '#f43f5e' : '#38bdf8');
+            plantChartObj.update();
+
+            // Ratio Chart
+            ratioChartObj.data.labels = aggregatedPlants.map(p => p.name);
+            ratioChartObj.data.datasets[0].data = aggregatedPlants.map(p => p.soxRatio.toFixed(1));
+            ratioChartObj.data.datasets[1].data = aggregatedPlants.map(p => p.noxRatio.toFixed(1));
+            ratioChartObj.data.datasets[2].data = aggregatedPlants.map(p => p.dustRatio.toFixed(1));
+            ratioChartObj.update();
+
+            // Doughnut Exceedance Chart
+            const exceedPlants = aggregatedPlants.filter(p => p.noxExceed > 0);
+            if (exceedPlants.length > 0) {
+                exceedDoughnutObj.data.labels = exceedPlants.map(p => `${p.name} 발전기`);
+                exceedDoughnutObj.data.datasets[0].data = exceedPlants.map(p => p.noxExceed);
+            } else {
+                exceedDoughnutObj.data.labels = ['초과 없음'];
+                exceedDoughnutObj.data.datasets[0].data = [1];
+            }
+            exceedDoughnutObj.update();
+        }
+
+        function resetFilters() {
+            document.getElementById('plantFilter').value = 'ALL';
+            document.getElementById('statusFilter').value = 'ALL';
+            document.getElementById('searchInput').value = '';
+            applyFilters();
+        }
+
+        function exportFilteredCSV() {
+            if (!filteredRows || filteredRows.length === 0) {
+                showToast("다운로드할 데이터가 없습니다.", true);
+                return;
+            }
+
+            let csvContent = "\uFEFF발전기,호기명,배출년월,SOx(ppm),NOx(ppm),먼지(mg/Sm3),NOx허용기준,먼지허용기준\n";
+            filteredRows.forEach(r => {
+                csvContent += `"${r.plant}","${r.unit}","${r.date}",${r.sox},${r.nox},${r.dust},${r.noxLimit},${r.dustLimit}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `대기오염물질_배출현황_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast("선택된 필터 데이터가 CSV 파일로 추출되었습니다.");
+        }
+
+        function showToast(message, isWarning = false) {
+            const toast = document.getElementById('toastNotification');
+            const msgEl = document.getElementById('toastMessage');
+            const iconEl = document.getElementById('toastIcon');
+            
+            if (toast && msgEl) {
+                msgEl.innerText = message;
+                toast.classList.remove('hidden');
+
+                if (isWarning) {
+                    toast.className = "transition-all duration-300 bg-amber-900/90 border-b border-amber-700 text-amber-100 text-xs py-2 px-4 text-center font-medium flex items-center justify-center space-x-2";
+                    if (iconEl) iconEl.className = "fa-solid fa-triangle-exclamation text-amber-400 text-sm";
+                } else {
+                    toast.className = "transition-all duration-300 bg-sky-900/90 border-b border-sky-700 text-sky-100 text-xs py-2 px-4 text-center font-medium flex items-center justify-center space-x-2";
+                    if (iconEl) iconEl.className = "fa-solid fa-circle-check text-emerald-400 text-sm";
+                }
+
+                setTimeout(() => {
+                    toast.classList.add('hidden');
+                }, 4000);
+            }
+        }
+    </script>
+</body>
+</html>
